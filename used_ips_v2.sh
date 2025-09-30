@@ -2,10 +2,6 @@
 set -euo pipefail
 
 input_csv="project_subnets.csv"
-output_file="no_reserved_ips.txt"
-
-# Clear old results
-> "$output_file"
 
 while IFS=, read -r -a cols; do
   # Skip header row
@@ -20,24 +16,22 @@ while IFS=, read -r -a cols; do
     [[ -n "$s" ]] && subs+=("$s")
   done
 
-  echo "==== Project: $project ===="
+  # Build regex like (subnet1|subnet2|subnet3)
+  regex="$(printf "%s|" "${subs[@]}")"
+  regex="(${regex%|})"
 
-  for subnet in "${subs[@]}"; do
-    output=$(gcloud compute addresses list \
-      --project="$project" \
-      --sort-by=subnetwork \
-      --format="table(name,address,subnetwork,region,status)" \
-      --filter="subnetwork~'$subnet'")
+  echo "==== Project: $project | Subnets: ${subs[*]} ===="
 
-    if [[ -z "$output" ]]; then
-      echo "Subnet: $subnet → No reserved IPs found"
-      echo "$project,$subnet" >> "$output_file"
-    else
-      echo "Subnet: $subnet"
-      echo "$output"
-    fi
-  done
+  # Run gcloud and capture output
+  output=$(gcloud compute addresses list \
+    --project="$project" \
+    --sort-by=subnetwork \
+    --format="table(name,address,subnetwork,region,status)" \
+    --filter="subnetwork~'$regex'")
+
+  if [[ -z "$output" ]]; then
+    echo "No reserved IPs found"
+  else
+    echo "$output"
+  fi
 done < "$input_csv"
-
-echo
-echo "✅ Subnets with no reserved IPs written to: $output_file"
