@@ -1,0 +1,47 @@
+Find the PSC forwarding rule (global) using that endpoint’s IP
+
+IP=THE_ENDPOINT_IP   # or skip IP and just list all PSC FRs
+gcloud compute forwarding-rules aggregated list \
+  --project=PROJECT_ID \
+  --filter="(IPAddress=$IP) OR (target~'serviceAttachments/') " \
+  --format='table(name,scope,IPAddress,loadBalancingScheme,target)'
+
+
+Delete the forwarding rule (this deletes the PSC endpoint)
+
+# If it showed under "global" scope:
+gcloud compute forwarding-rules delete FORWARDING_RULE_NAME \
+  --global \
+  --project=PROJECT_ID
+
+
+Delete the static address the FR was using (global or regional—match the FR scope)
+
+# Global example:
+gcloud compute addresses delete ADDRESS_NAME --global --project=PROJECT_ID
+# Regional example:
+gcloud compute addresses delete ADDRESS_NAME --region=REGION --project=PROJECT_ID
+
+
+After the FR is gone, the Service Directory endpoint that said “non-user-defined” will no longer block your teardown. Note that Service Directory namespaces/services created by PSC are intentionally non-deletable by users; you remove the PSC endpoint instead (you don’t have to delete those SD resources themselves). 
+Stack Overflow
++1
+
+Permissions you’ll need
+
+To delete the FR: compute.forwardingRules.delete (in roles like compute.admin or compute.loadBalancerAdmin).
+
+If it’s a PSC endpoint, some orgs also require the PSC-specific delete permission on global FRs.
+
+Deleting the SD endpoint directly would require servicedirectory.endpoints.delete, but in this case it’s not applicable because it’s Google-managed. 
+Google Cloud
+
+If you want, paste the output of:
+
+gcloud compute forwarding-rules aggregated list \
+  --project=PROJECT_ID \
+  --filter="target~'serviceAttachments/'" \
+  --format='table(name,scope,IPAddress,target)'
+
+
+and I’ll point to the exact delete command (global vs regional) for your entry.
