@@ -1,0 +1,4 @@
+# Destination project/region
+gcloud compute forwarding-rules describe <FR_NAME> --region=<DEST_REGION> \
+  --format="table(name,region,loadBalancingScheme,ports,IPAddress,allowGlobalAccess)"
+# expect: loadBalancingScheme=INTERNAL and allowGlobalAccess=true
