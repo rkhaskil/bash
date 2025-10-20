@@ -36,3 +36,10 @@ gcloud compute networks subnets get-iam-policy "$SUBNET" \
 | jq -r --arg gke "$GKE_SA" --arg cloud "$CLOUD_SA" --arg node "$NODE_SA" '
   .bindings[]
   | select( any(.members[]?; contains($gke) or contains($cloud) or contains($node)) )
+
+
+list gke sa that have the required role
+gcloud projects get-iam-policy "$HOST_PROJECT_ID" \
+  --flatten="bindings[]" \
+  --format="table(bindings.role, bindings.members)" \
+  --filter="bindings.role:roles/container.hostServiceAgentUser"
