@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Usage: ./subnet_usage.sh <HOST_PROJECT_ID> <SUBNET_NAME> [REGION]
+# Example: ./subnet_usage.sh my-host-project prod-subnet us-central1
+
+HOST_PROJECT="${1:-}"
+SUBNET_NAME="${2:-}"
+REGION_ARG="${3:-}"
+
+if [[ -z "$HOST_PROJECT" || -z "$SUBNET_NAME" ]]; then
+  echo "Usage: $0 <HOST_PROJECT_ID> <SUBNET_NAME> [REGION]" >&2
+  exit 1
+fi
+
+# Resolve region if not provided (handles multiple matches defensively)
+if [[ -z "${REGION_ARG}" ]]; then
+  echo "Resolving region for subnet '$SUBNET_NAME' in project '$HOST_PROJECT'..."
+  # List matching subnets by name across regions
+  mapfile -t MATCHES < <(gcloud compute networks subnets list \
+    --project="$HOST_PROJECT" \
+    --filter="name=$SUBNET_NAME" \
+    --format="value(region.basename())")
+
+  if (( ${#MATCHES[@]} == 0 )); then
+    echo "ERROR: No subnet named '$SUBNET_NAME' found in project '$HOST_PROJECT'." >&2
+    exit 2
+  elif (( ${#MATCHES[@]} > 1 )); then
+    echo "ERROR: Multiple regions have a subnet named '$SUBNET_NAME': ${MATCHES[*]}" >&2
+    echo "Please rerun with an explicit REGION argument." >&2
+    exit 3
+  else
+    REGION="${MATCHES[0]}"
+  fi
+else
+  REGION="$REGION_ARG"
+fi
+
+# Describe subnet to get details + selfLink
+echo "Fetching subnet details..."
+SUBNET_DESC="$(gcloud compute networks subnets describe "$SUBNET_NAME" \
+  --region="$REGION" \
+  --project="$HOST_PROJECT" \
+  --format="json")"
+
+# Extract a few handy fields via gcloud format strings (avoid jq dependency)
+CIDR="$(gcloud compute networks subnets describe "$SUBNET_NAME" --region="$REGION" --project="$HOST_PROJECT" --format='value(ipCidrRange)')"
+NETWORK_URI="$(gcloud compute networks subnets describe "$SUBNET_NAME" --region="$REGION" --project="$HOST_PROJECT" --format='value(network)')"
+NETWORK_NAME="$(basename "$NETWORK_URI")"
+SUBNET_URI="projects/${HOST_PROJECT}/regions/${REGION}/subnetworks/${SUBNET_NAME}"
+
+echo
+echo "================ Subnet Summary ================"
+echo "Project       : $HOST_PROJECT"
+echo "Subnet        : $SUBNET_NAME"
+echo "Region        : $REGION"
+echo "Network       : $NETWORK_NAME"
+echo "CIDR          : $CIDR"
+echo "Secondary CIDRs:"
+gcloud compute networks subnets describe "$SUBNET_NAME" \
+  --region="$REGION" --project="$HOST_PROJECT" \
+  --format="table[box,title='Secondary Ranges'](secondaryIpRanges[].rangeName:label=NAME, secondaryIpRanges[].ipCidrRange:label=CIDR)"
+
+REPORT="subnet_usage_${HOST_PROJECT}_${SUBNET_NAME}_${REGION}.csv"
+echo "resource_type,name,ip_or_range,location,extra,link" > "$REPORT"
+
+echo
+echo "============ VM NICs using this subnet ============"
+gcloud compute instances list \
+  --project="$HOST_PROJECT" \
+  --filter="networkInterfaces.subnetwork:($SUBNET_URI)" \
+  --format="table[box,title='Instances'](
+    name,
+    zone.basename():label=ZONE,
+    networkInterfaces[].networkIP:label=IP,
+    networkInterfaces[].aliasIpRanges[].ipCidrRange.list():label=ALIAS_RANGES
+  )"
+
+# Append to CSV (instances)
+gcloud compute instances list \
+  --project="$HOST_PROJECT" \
+  --filter="networkInterfaces.subnetwork:($SUBNET_URI)" \
+  --format="csv[no-heading](name,networkInterfaces[].networkIP,zone.basename(),networkInterfaces[].aliasIpRanges[].ipCidrRange.list(),selfLink)" \
+  | while IFS=, read -r NAME IP ZONE ALIASES LINK; do
+      echo "instance,$NAME,$IP,$ZONE,\"aliases: $ALIASES\",$LINK" >> "$REPORT"
+    done
+
+echo
+echo "===== Reserved internal addresses (static) in subnet ====="
+gcloud compute addresses list \
+  --project="$HOST_PROJECT" \
+  --regions="$REGION" \
+  --filter="subnetwork:($SUBNET_URI)" \
+  --format="table[box,title='Addresses'](
+    name,
+    address,
+    status,
+    purpose,
+    users.list():label=USERS
+  )"
+
+# Append to CSV (addresses)
+gcloud compute addresses list \
+  --project="$HOST_PROJECT" \
+  --regions="$REGION" \
+  --filter="subnetwork:($SUBNET_URI)" \
+  --format="csv[no-heading](name,address,region.basename(),purpose,selfLink)" \
+  | while IFS=, read -r NAME IP LOC PURPOSE LINK; do
+      echo "address,$NAME,$IP,$LOC,$PURPOSE,$LINK" >> "$REPORT"
+    done
+
+echo
+echo "===== Regional forwarding rules tied to this subnet ====="
+# (Global forwarding rules don't take a subnetwork; regional internal LBs/PSC do.)
+gcloud compute forwarding-rules list \
+  --project="$HOST_PROJECT" \
+  --regions="$REGION" \
+  --filter="subnetwork:($SUBNET_URI)" \
+  --format="table[box,title='Forwarding Rules'](
+    name,
+    IPAddress,
+    IPProtocol,
+    loadBalancingScheme,
+    target
+  )"
+
+# Append to CSV (forwarding rules)
+gcloud compute forwarding-rules list \
+  --project="$HOST_PROJECT" \
+  --regions="$REGION" \
+  --filter="subnetwork:($SUBNET_URI)" \
+  --format="csv[no-heading](name,IPAddress,region.basename(),loadBalancingScheme,selfLink)" \
+  | while IFS=, read -r NAME IP LOC SCHEME LINK; do
+      echo "forwarding_rule,$NAME,$IP,$LOC,$SCHEME,$LINK" >> "$REPORT"
+    done
+
+echo
+echo "======== Done ========"
+echo "CSV report written to: $REPORT"
