@@ -48,6 +48,30 @@ Cloud NAT logs (if enabled):
 
 Shows internal (node) IP ↔ NAT external IP mapping.
 
+#find which node the pod belongs to
+POD_IP=240.x.x.x
+
+gcloud compute instances list \
+  --filter="name~'^gke-'" \
+  --format="json(name,zone,labels,metadata,networkInterfaces)" \
+| python3 - <<'PY'
+import sys, json, ipaddress
+pod = ipaddress.ip_address("${POD_IP}")
+data = json.load(sys.stdin)
+for inst in data:
+    for nic in inst.get("networkInterfaces", []):
+        for a in nic.get("aliasIpRanges", []):
+            cidr = a.get("ipCidrRange")
+            if cidr and pod in ipaddress.ip_network(cidr):
+                name = inst["name"]
+                zone = inst["zone"].split("/")[-1]
+                labels = inst.get("labels", {})
+                pool = labels.get("goog-gke-nodepool")  # often present
+                print(f"INSTANCE={name} ZONE={zone} NODEPOOL={pool or 'unknown'} CIDR={cidr}")
+                sys.exit(0)
+print("NOT FOUND")
+PY
+
 You can then map the src_ip to a VM with:
 
 gcloud compute instances list --filter="networkInterfaces.networkIP=('10.100.3.12')"
