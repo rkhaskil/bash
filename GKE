@@ -1,0 +1,53 @@
+kubectl run -it testpod --image=curlimages/curl --restart=Never -- curl ifconfig.me
+
+If you don’t have Kubernetes access (GCP only)
+
+Use VPC Flow Logs / NAT logs to get the source (pre/post NAT) IP, then map to the instance:
+
+# Given a node internal IP (src_ip from flow logs), map to the VM
+gcloud compute instances list \
+  --filter="networkInterfaces.networkIP=('10.100.3.12')" \
+  --format="table(name,zone,networkInterfaces[].networkIP)"
+
+
+Tip: GKE nodes usually have names like gke-<cluster>-<pool>-<hash>-<suffix> and carry labels goog-gke-node.
+
+List all GKE nodes and their internal IPs from Compute Engine:
+
+# Narrow to instances tagged/labeled as GKE nodes
+gcloud compute instances list \
+  --filter="labels.cluster-name:<YOUR_CLUSTER_NAME>" \
+  --format="table(name,zone,networkInterfaces[].networkIP)"
+
+
+(If labels aren’t present, filter by name prefix name~'^gke-<CLUSTER>'.)
+
+From the GKE node pool (no kubectl): get the Managed Instance Group(s) → instances → IPs
+
+# Get node pools
+gcloud container node-pools list --cluster=<CLUSTER> --region=<REGION>
+
+# Describe a node pool to find its MIG(s)
+gcloud container node-pools describe <POOL> \
+  --cluster=<CLUSTER> --region=<REGION> \
+  --format="value(instanceGroupUrls[])"
+
+# List instances in the MIG, then fetch their internal IPs
+gcloud compute instance-groups managed list-instances <MIG_NAME> --zone=<ZONE> \
+  --format="table(instance,instanceStatus)"
+gcloud compute instances describe <INSTANCE_NAME> --zone=<ZONE> \
+  --format="value(networkInterfaces[0].networkIP)"
+
+If you only have Logs access
+
+VPC Flow Logs (host project, shared VPC subnet):
+
+jsonPayload.connection.src_ip = node internal IP (pre-NAT).
+
+Cloud NAT logs (if enabled):
+
+Shows internal (node) IP ↔ NAT external IP mapping.
+
+You can then map the src_ip to a VM with:
+
+gcloud compute instances list --filter="networkInterfaces.networkIP=('10.100.3.12')"
