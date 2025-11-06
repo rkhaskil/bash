@@ -1,0 +1,173 @@
+1) Map the load balancer path (FR → Backend Service → Health Check → Instance Groups)
+# List external passthrough forwarding rules
+gcloud compute forwarding-rules list \
+  --filter='loadBalancingScheme=EXTERNAL'
+
+# Describe the one in question; note IP, ports, target, network/subnet
+gcloud compute forwarding-rules describe <FR_NAME> --region <REGION>
+# or --global if global (rare for passthrough NLB)
+
+# Follow the target to the backend service
+gcloud compute backend-services describe <BACKEND_SERVICE> --global
+# Note: protocol (TCP/UDP), loadBalancingScheme, healthChecks[], logging, enableProxyProtocol,
+# connectionDraining, backends[].group, balancingMode/Utilization/Rate, capacityScaler
+
+2) Check backend health (which nodes/IGs are failing)
+# Per-instance health state as seen by the LB (gold!):
+gcloud compute backend-services get-health <BACKEND_SERVICE> --global
+
+
+Look for HEALTHY/UNHEALTHY/DRAINING per instance. If you see nodes marked healthy even when the app is down on that node, your health check is testing the wrong port.
+
+3) Inspect the Health Check (is it aimed at the right port?)
+
+For a NodePort-based service using externalTrafficPolicy: Local, the LB should health-check the Service’s healthCheckNodePort (a special port that is only healthy when a ready endpoint exists locally). If the HC is pointed at the app port instead, nodes without a local pod can still be declared healthy → the NLB will send traffic there → connection refused.
+
+# What type & which port is checked?
+gcloud compute health-checks describe <HC_NAME>
+
+# Key fields to read:
+# - type: TCP or HTTP(S)
+# - portSpecification (USE_FIXED_PORT / USE_SERVING_PORT)
+# - port (if fixed)
+# - proxyHeader (should be NONE unless you *intend* PROXY protocol)
+# - checkIntervalSec / timeoutSec / healthyThreshold / unhealthyThreshold
+
+
+What to look for
+
+If portSpecification=USE_FIXED_PORT on some app port, that’s a red flag for NodePort services with externalTrafficPolicy: Local.
+
+If proxyHeader=PROXY_V1 but your app does not expect PROXY, turn it off.
+
+Quick fixes (if you control the LB):
+
+# Point HC to the correct NodePort (the service’s healthCheckNodePort; you or the service owner can supply the value)
+gcloud compute health-checks update tcp <HC_NAME> --port <HEALTHCHECK_NODEPORT>
+
+# Make HC stricter and faster to remove bad nodes quickly (example values):
+gcloud compute health-checks update tcp <HC_NAME> \
+  --check-interval 5s --timeout 5s --healthy-threshold 2 --unhealthy-threshold 2
+
+# Ensure PROXY protocol is disabled unless needed
+gcloud compute backend-services update <BACKEND_SERVICE> --global --no-enable-proxy-protocol
+
+4) Verify firewall rules for health checks and traffic
+
+Health check source ranges must reach the port you’re checking (NodePort range if that’s the target).
+
+# See candidate rules allowing HC source ranges (both prefixes)
+gcloud compute firewall-rules list \
+  --filter='direction=INGRESS AND (sourceRanges:(35.191.0.0/16 130.211.0.0/22))'
+
+# Verify they allow the HC port (or NodePort range 30000-32767)
+gcloud compute firewall-rules describe <RULE_NAME>
+
+
+If the HC can’t reach the NodePort, backends flap and you’ll see intermittent refusals.
+
+5) Inspect instance groups and their port wiring/capacity
+# List backends (instance groups) on the backend service
+gcloud compute backend-services describe <BACKEND_SERVICE> --global | sed -n '/backends:/,$p'
+
+# Show named ports on each IG (the BE uses a namedPort → port number mapping)
+gcloud compute instance-groups list
+gcloud compute instance-groups list-named-ports --zone <ZONE> --instance-group <IG_NAME>
+
+# Capacity & balancing mode on each backend:
+# (UTILIZATION/CONNECTION/RATE, maxUtilization, maxRate, capacityScaler)
+gcloud compute backend-services describe <BACKEND_SERVICE> --global | sed -n '/backends:/,/^$/p'
+
+
+What to look for
+
+Mismatched named port between backend service and instance groups.
+
+capacityScaler < 1.0 unintentionally throttling a backend.
+
+Balancing mode caps (e.g., maxRate) that could cause refusals under burst.
+
+Mitigations
+
+# Adjust capacity/scaler (example: fully enable a backend IG)
+gcloud compute backend-services update-backend <BACKEND_SERVICE> --global \
+  --instance-group <IG_NAME> --instance-group-zone <ZONE> --capacity-scaler 1.0
+
+# Update balancing mode or limits if you’re hitting caps
+gcloud compute backend-services update-backend <BACKEND_SERVICE> --global \
+  --instance-group <IG_NAME> --instance-group-zone <ZONE> \
+  --balancing-mode UTILIZATION --max-utilization 0.8
+
+6) Enable (or verify) LB logging to see real refusals
+
+Passthrough TCP/UDP LB supports backend logging. Turn it on if it isn’t already.
+
+# Enable logging with sample rate (e.g., 1.0 = 100%)
+gcloud compute backend-services update <BACKEND_SERVICE> --global \
+  --enable-logging --logging-sample-rate 1.0
+
+
+Then query logs (helps correlate client IP → backend instance → status):
+
+# Example log query (tune to your project):
+gcloud logging read \
+ 'resource.type="backend_service" AND resource.labels.backend_service_name="<BACKEND_SERVICE>"' \
+ --limit=50 --format=json
+
+
+You’re looking for backend connection errors and which instance handled them.
+
+7) Connection draining (reduce mid-flight resets during evictions)
+# Give the LB time to stop sending new connections to a failing node
+gcloud compute backend-services update <BACKEND_SERVICE> --global \
+  --connection-draining-timeout=30
+
+8) Identify the GKE node instance groups for the target cluster
+
+Useful when you need to compare node pools or drain a single IG temporarily.
+
+# If you can describe cluster (read perms):
+gcloud container clusters describe <CLUSTER> --region <REGION> \
+  --format='get(nodePools[].instanceGroupUrls)'
+
+# Or discover IGs from the backend service’s backends (then list instances):
+gcloud compute instance-groups managed list-instances <IG_NAME> --zone <ZONE> --format='table(instance,instanceStatus)'
+
+
+Cross-check unhealthy instances from get-health against these lists.
+
+9) Emergency stabilizers (no kubectl required)
+
+HC → correct port: if you can switch the health check to the correct NodePort, do it; it prevents the LB from sending to nodes with no local endpoints.
+
+Temporarily remove a flapping backend:
+
+gcloud compute backend-services update-backend <BACKEND_SERVICE> --global \
+  --instance-group <IG_NAME> --instance-group-zone <ZONE> --capacity-scaler 0.0
+
+
+Tighten HC + enable draining (Section 3 & 7).
+
+Raise logging (Section 6) to observe impact quickly.
+
+What likely caused the refusals (minus TLS)
+
+Health check testing the wrong port → nodes with no local endpoints stay “healthy”, receive traffic → kernel sends RST = “connection refused.”
+
+Capacity/balancing caps (maxRate / utilization) hit under OOM churn → backend rejects new connections.
+
+Flapping backends due to missing firewall for HC → intermittent health → traffic lands on nodes not ready.
+
+PROXY header accidentally on (even w/o TLS issues) → first bytes unexpected by app → immediate drop/refusal at accept phase.
+
+If you paste:
+
+gcloud compute backend-services describe <BE> --global
+
+gcloud compute health-checks describe <HC>
+
+gcloud compute backend-services get-health <BE> --global
+
+One instance-groups list-named-ports for a backend IG,
+
+…I can point to the exact miswire and give you the exact gcloud ... update lines to fix it.
