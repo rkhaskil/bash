@@ -1,0 +1,124 @@
+1) Prove Git is actually using the proxy
+
+Check Git’s proxy config at all levels:
+
+git config --show-origin --get-regexp 'http\.(proxy|httpsProxy|noProxy|sslVerify|sslCAInfo|version)'
+
+
+Also check environment proxy vars (Git/curl will honor these too):
+
+env | egrep -i 'http_proxy|https_proxy|all_proxy|no_proxy'
+
+
+If both are set, you can get inconsistent behavior. Pick one approach (Git config or env vars) and keep it consistent.
+
+Quick forced test (overrides everything for one command):
+
+git -c http.proxy=http://proxy.host:port clone <repo_url>
+
+2) Validate the proxy can CONNECT to your Git host
+
+If you’re cloning via HTTPS, the proxy must support CONNECT to 443.
+
+Run:
+
+# Replace host with your git host (e.g., github.com, git.company.com)
+curl -v --proxy http://proxy.host:port https://<git_host>/ -o /dev/null
+
+
+If this resets, it’s not a “Git” problem — it’s proxy policy/auth/SSL inspection, or it can’t tunnel reliably.
+
+If your proxy requires auth:
+
+curl -v --proxy http://user:pass@proxy.host:port https://<git_host>/ -o /dev/null
+
+3) Turn on Git + curl trace and look for the exact reset moment
+GIT_TRACE=1 GIT_TRACE_CURL=1 GIT_CURL_VERBOSE=1 \
+git clone <repo_url> 2>&1 | tee /tmp/git-proxy-debug.log
+
+
+In the log, pay attention to:
+
+CONNECT <git_host>:443 result
+
+Any Proxy-Authenticate: challenges (407 issues)
+
+TLS handshake lines (SSL inspection/certs)
+
+Whether it resets during pack download (long-lived tunnel drops / idle timeouts)
+
+4) Force HTTP/1.1 (common proxy compatibility fix)
+
+A lot of corporate proxies + HTTP/2 = random resets.
+
+git config --global http.version HTTP/1.1
+git clone <repo_url>
+
+
+(You can undo later with git config --global --unset http.version.)
+
+5) If your org does SSL inspection, fix CA trust (don’t disable SSL long-term)
+
+If the proxy is doing TLS interception, your machine needs the corporate root CA trusted by Git/curl.
+
+Check if Git is verifying and which CA bundle it uses:
+
+git config --global --get http.sslVerify
+git config --global --get http.sslCAInfo
+
+
+If curl works only with -k or Git works only with http.sslVerify=false, you likely need to point Git at the corp CA bundle:
+
+git config --global http.sslCAInfo /path/to/corp-root-ca.pem
+
+
+(Your IT/security team typically provides that PEM.)
+
+6) Avoid proxy credential problems (407 / auth method)
+
+If proxy auth is flaky, make it explicit in Git:
+
+git config --global http.proxy http://user:pass@proxy.host:port
+git config --global http.proxyAuthMethod basic
+
+
+If your password has special characters, URL-encode it (common hidden cause of weird resets).
+
+7) If you’re cloning over SSH, that’s a different proxy story
+
+SSH doesn’t automatically use HTTP proxies. If your repo URL is git@host:org/repo.git, you either need:
+
+direct SSH allowed outbound, or
+
+SSH over HTTPS, or
+
+a ProxyCommand (e.g., nc / corkscrew) approved in your environment
+
+Quick check:
+
+ssh -vvvT git@<git_host>
+
+
+If it resets immediately, SSH is probably blocked and you should use HTTPS cloning via the proxy instead.
+
+8) Proxy drops long downloads: try shallow clone + reduce compression
+
+If it resets partway through large repos:
+
+git clone --depth 1 <repo_url>
+git config --global core.compression 0
+
+
+If shallow succeeds but full fails, it’s very consistent with proxy idle/size/time limits.
+
+Most useful next data (paste back)
+
+If you paste:
+
+output of git config --show-origin --get-regexp 'http\.(proxy|httpsProxy|noProxy|version|ssl.*)'
+
+output of curl -v --proxy http://proxy.host:port https://<git_host>/ -o /dev/null (redact creds)
+
+the last ~40 lines of /tmp/git-proxy-debug.log around the reset
+
+…I can tell you whether it’s auth (407), TLS inspection/CA, HTTP2/proxy incompatibility, or tunnel drops/timeouts.
