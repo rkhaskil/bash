@@ -1,0 +1,57 @@
+Logs Explorer filters
+1) Namespace (zone) creation attempts (including denied)
+
+Use Admin Activity and filter by Service Directory + CreateNamespace:
+
+logName=~"cloudaudit.googleapis.com%2Factivity"
+protoPayload.serviceName="servicedirectory.googleapis.com"
+protoPayload.methodName="google.cloud.servicedirectory.v1.RegistrationService.CreateNamespace"
+
+
+Now add “403-ish” failures:
+
+protoPayload.status.code=7
+
+
+status.code=7 = PERMISSION_DENIED (commonly what you think of as HTTP 403 in these logs)
+
+Who did it: protoPayload.authenticationInfo.principalEmail
+
+What they tried to create: look in protoPayload.request / resourceName
+
+Service name + method name are documented here.
+
+2) “Records” creation attempts (Service + Endpoint)
+
+If the user is creating a namespace and then adding entries, you’ll usually see one or more of these methods:
+
+logName=~"cloudaudit.googleapis.com%2Factivity"
+protoPayload.serviceName="servicedirectory.googleapis.com"
+(
+  protoPayload.methodName="google.cloud.servicedirectory.v1.RegistrationService.CreateService"
+  OR protoPayload.methodName="google.cloud.servicedirectory.v1.RegistrationService.CreateEndpoint"
+)
+
+
+Add denied filter if needed:
+
+protoPayload.status.code=7
+
+
+(Those method names are in the Service Directory audit logging doc.)
+
+3) If you’re not sure which SD method they hit
+
+Broad catch-all:
+
+protoPayload.serviceName="servicedirectory.googleapis.com"
+protoPayload.status.code=7
+
+
+Then expand an entry and look at:
+
+protoPayload.methodName
+
+protoPayload.authorizationInfo.permission (what permission was checked)
+
+protoPayload.resourceName (the SD resource path)
