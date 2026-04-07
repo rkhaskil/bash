@@ -1,0 +1,123 @@
+The exact resource names to use
+
+Google’s full resource name / asset name docs give the formats you need:
+
+Project
+//cloudresourcemanager.googleapis.com/projects/PROJECT_ID
+Shared VPC network
+//compute.googleapis.com/projects/HOST_PROJECT/global/networks/NETWORK
+Managed zone
+//dns.googleapis.com/projects/HOST_PROJECT/managedZones/ZONE_NUMBER
+Cross-region forwarding rule
+//compute.googleapis.com/projects/SERVICE_PROJECT/global/forwardingRules/FORWARDING_RULE
+Health check
+//compute.googleapis.com/projects/SERVICE_PROJECT/global/healthChecks/HEALTH_CHECK
+Fastest way in the console
+
+In Policy Troubleshooter, enter:
+
+the service account email
+the full resource name
+the permission
+
+If you do not know the full resource name, Google says you can click Browse and search for the resource there. Troubleshooter will fail if the permission is not applicable to the resource type, so use the project resource for *.list permissions and the specific resource for *.get and dns.changes.create.
+
+gcloud commands to run
+
+Replace the placeholders first:
+
+SA_EMAIL="my-sa@my-project.iam.gserviceaccount.com"
+HOST_PROJECT="host-project-id"
+SERVICE_PROJECT="service-project-id"
+
+HOST_PROJECT_RES="//cloudresourcemanager.googleapis.com/projects/${HOST_PROJECT}"
+SERVICE_PROJECT_RES="//cloudresourcemanager.googleapis.com/projects/${SERVICE_PROJECT}"
+
+ZONE_RES="//dns.googleapis.com/projects/${HOST_PROJECT}/managedZones/ZONE_NUMBER"
+FR_RES="//compute.googleapis.com/projects/${SERVICE_PROJECT}/global/forwardingRules/FORWARDING_RULE"
+HC_RES="//compute.googleapis.com/projects/${SERVICE_PROJECT}/global/healthChecks/HEALTH_CHECK"
+NET_RES="//compute.googleapis.com/projects/${HOST_PROJECT}/global/networks/SHARED_VPC_NETWORK"
+
+1) Can the SA write the DNS change in the host project?
+
+gcloud beta policy-intelligence troubleshoot-policy iam "${ZONE_RES}" \
+  --principal-email="${SA_EMAIL}" \
+  --permission="dns.changes.create"
+
+2) Can the SA read the cross-region ILB forwarding rule in the service project?
+
+gcloud beta policy-intelligence troubleshoot-policy iam "${FR_RES}" \
+  --principal-email="${SA_EMAIL}" \
+  --permission="compute.globalForwardingRules.get"
+
+3) Can the SA read the health check in the service project?
+
+gcloud beta policy-intelligence troubleshoot-policy iam "${HC_RES}" \
+  --principal-email="${SA_EMAIL}" \
+  --permission="compute.healthChecks.get"
+
+4) Can the SA list health checks in the service project?
+
+gcloud beta policy-intelligence troubleshoot-policy iam "${SERVICE_PROJECT_RES}" \
+  --principal-email="${SA_EMAIL}" \
+  --permission="compute.healthChecks.list"
+
+5) Can the SA list managed zones in the host project?
+
+gcloud beta policy-intelligence troubleshoot-policy iam "${HOST_PROJECT_RES}" \
+  --principal-email="${SA_EMAIL}" \
+  --permission="dns.managedZones.list"
+
+6) Optional: test the health-signals permission support mentioned by support
+
+Try the network first. If Troubleshooter says the permission is not applicable to that resource, retry it against the host project resource instead.
+
+gcloud beta policy-intelligence troubleshoot-policy iam "${NET_RES}" \
+  --principal-email="${SA_EMAIL}" \
+  --permission="dns.networks.useHealthSignals"
+
+Google documents this exact Troubleshooter CLI pattern and notes that the permission must be applicable to the resource you pass in.
+
+Then use Policy Analyzer to see where the permission comes from
+
+After you find the failing permission, use Policy Analyzer to see which binding grants or does not grant it:
+
+gcloud asset analyze-iam-policy --project="${HOST_PROJECT}" \
+  --identity="serviceAccount:${SA_EMAIL}" \
+  --full-resource-name="${ZONE_RES}" \
+  --permissions="dns.changes.create"
+gcloud asset analyze-iam-policy --project="${SERVICE_PROJECT}" \
+  --identity="serviceAccount:${SA_EMAIL}" \
+  --full-resource-name="${FR_RES}" \
+  --permissions="compute.globalForwardingRules.get"
+gcloud asset analyze-iam-policy --project="${SERVICE_PROJECT}" \
+  --identity="serviceAccount:${SA_EMAIL}" \
+  --full-resource-name="${HC_RES}" \
+  --permissions="compute.healthChecks.get"
+
+Google’s docs say gcloud asset analyze-iam-policy can answer which identities have which permissions on a resource, and the response includes the relevant binding; fullyExplored: true indicates the analysis completed fully.
+
+Roles you need to run the tools
+
+To run Policy Analyzer, Google says you typically need:
+
+roles/cloudasset.viewer
+roles/iam.roleViewer if custom roles are involved
+roles/serviceusage.serviceUsageConsumer for CLI use.
+
+To run Policy Troubleshooter, Google says you typically need:
+
+roles/iam.securityReviewer
+roles/iam.denyReviewer if you want deny-policy visibility
+roles/serviceusage.serviceUsageConsumer for CLI use.
+
+One warning: Policy Troubleshooter does not diagnose VPC Service Controls issues. If your org uses VPC SC, a 403 can still come from that and Troubleshooter will not explain it.
+
+If you want, paste your actual:
+
+host project ID
+service project ID
+zone name
+forwarding rule name
+health check name
+SA email
