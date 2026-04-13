@@ -1,0 +1,171 @@
+What you’re describing usually points to **one of two buckets**:
+
+1. **The load balancer can’t use the backend** even though the app itself works when reached directly. In GCP that is most often health check, backend port/protocol, firewall, or URL map / host rule mismatch. Google’s LB troubleshooting docs explicitly call out cases where all backends are unhealthy or the LB can’t establish a connection because the service isn’t listening on the port the backend service expects. ([Google Cloud Documentation][1])
+
+2. **The Console backend page error is a separate issue**. That page is reading NEG/backend details through Compute APIs, and those API methods require permissions like `compute.networkEndpointGroups.get` and `compute.networkEndpointGroups.list`. So the Console error can be caused by IAM/API/UI issues and does **not** automatically mean the runtime dataplane is broken. Also, Google’s status page currently shows no broad severe incident. ([Google Cloud Documentation][2])
+
+Given that **the container works internally**, I would focus first on whether the LB sees the backend as healthy and whether it is routing to the right port/path/host.
+
+## Best next checks
+
+### 1) Check backend health outside the Console
+
+This is the fastest truth source.
+
+For a global backend service:
+
+```bash
+gcloud compute backend-services get-health BACKEND_SERVICE_NAME --global
+```
+
+For a regional backend service:
+
+```bash
+gcloud compute backend-services get-health BACKEND_SERVICE_NAME --region=REGION
+```
+
+Google documents `backendServices.getHealth` / `regionBackendServices.getHealth` as the way to retrieve the current health state of backend instances or endpoints. ([Google Cloud Documentation][3])
+
+What you want to see:
+
+* `HEALTHY` = move on to URL map / frontend / host header checks
+* `UNHEALTHY` or empty = health check, NEG membership, port, or firewall problem
+
+### 2) Verify the health check matches what the app actually serves
+
+For backends that are instance groups or zonal NEGs, the backend service must have a health check. Serverless NEGs and global internet NEGs are the exceptions. ([Google Cloud Documentation][4])
+
+Check:
+
+```bash
+gcloud compute backend-services describe BACKEND_SERVICE_NAME --global
+# or --region=REGION
+
+gcloud compute health-checks describe HEALTH_CHECK_NAME
+```
+
+Look for:
+
+* wrong port
+* wrong request path, such as `/healthz` vs `/`
+* wrong protocol, such as HTTP health check against an HTTPS-only app
+* app only listening on localhost instead of the pod/node interface
+
+A very common pattern is: “works when I curl it from inside,” but the LB health check is probing a different port or path. Google’s docs specifically call out using the serving port and ensuring the backend is listening on the expected port. ([Google Cloud Documentation][1])
+
+### 3) Verify the NEG actually contains the right endpoints
+
+Since your Console backend page is failing, use CLI.
+
+```bash
+gcloud compute network-endpoint-groups list
+
+gcloud compute network-endpoint-groups list-network-endpoints NEG_NAME --zone=ZONE
+```
+
+NEGs are how GCP can target endpoints more granularly, including pod-level backends in GKE. The endpoint detail/list APIs are the same area the Console is trying to read. ([Google Cloud Documentation][5])
+
+If the NEG is empty, stale, or missing expected pod IP:port entries, that is a strong clue.
+
+### 4) Check URL map and host/path routing
+
+If backend health is good but the URL through the LB still fails, the next suspect is routing.
+
+```bash
+gcloud compute url-maps describe URL_MAP_NAME --global
+```
+
+In GCP, the URL map decides which backend service gets traffic based on host/path rules, and it always has a default backend or bucket. If the request host header or path doesn’t match what you think, traffic can go somewhere else or hit the wrong default. ([Google Cloud Documentation][6])
+
+Common gotchas:
+
+* LB URL works only with the expected `Host:` header
+* path rule sends `/api/*` to a different backend than `/`
+* default backend is not the one you tested internally
+
+### 5) Turn on and inspect LB + health check logs
+
+GCP supports health check logging and LB logging, and the troubleshooting docs recommend using them to verify that probes reach the backend and whether requests are being routed successfully. ([Google Cloud Documentation][7])
+
+If health check logs show no probes arriving, think:
+
+* VPC firewall
+* NetworkPolicy
+* sidecar/service mesh policy
+* wrong backend port
+
+If request logs show `failed_to_pick_backend`, that usually means no healthy backend was available. ([Google Cloud Documentation][1])
+
+### 6) Run a Connectivity Test
+
+Network Intelligence Center supports testing connectivity to Google Cloud load balancers and can analyze configuration and, in some cases, live dataplane reachability. ([Google Cloud Documentation][8])
+
+This is especially useful when:
+
+* you suspect firewall / routing / proxy-only subnet issues
+* the Console page for backend details is flaky
+* you need something more deterministic than trial-and-error curls
+
+## How I’d interpret your exact symptoms
+
+Because **the app works internally**, I would rank likely causes like this:
+
+1. **Health check mismatch**
+   Wrong path, wrong port, wrong protocol, or app not responding with what the check expects. ([Google Cloud Documentation][1])
+
+2. **URL map or host-header mismatch**
+   Internal curl hits the app directly, but the LB routes based on host/path rules. ([Google Cloud Documentation][6])
+
+3. **NEG/backend registration issue**
+   The backend service may point at a NEG whose endpoints are missing, stale, or not healthy. ([Google Cloud Documentation][5])
+
+4. **Firewall / policy between LB health checks and backend**
+   Especially if probes never arrive or health stays red. GCP troubleshooting guidance repeatedly points to health check reachability as a first check. ([Google Cloud Documentation][7])
+
+5. **Separate Console/IAM/UI problem**
+   The `/compute/networkendpoints/details/...` page failure may simply mean the Console cannot read NEG details because of UI/API/IAM issues, even while the actual dataplane issue is something else. The API calls behind that require NEG read permissions. ([Google Cloud Documentation][2])
+
+## What I would do right now, in order
+
+Run these and compare the outputs:
+
+```bash
+gcloud compute backend-services get-health BACKEND_SERVICE_NAME --global
+# or:
+gcloud compute backend-services get-health BACKEND_SERVICE_NAME --region=REGION
+
+gcloud compute backend-services describe BACKEND_SERVICE_NAME --global
+# or --region=REGION
+
+gcloud compute health-checks describe HEALTH_CHECK_NAME
+
+gcloud compute network-endpoint-groups list-network-endpoints NEG_NAME --zone=ZONE
+
+gcloud compute url-maps describe URL_MAP_NAME --global
+```
+
+Then verify from a client:
+
+* exact URL used
+* whether HTTPS is expected
+* whether the request requires a specific `Host` header
+* whether the backend service port matches the app’s real listening port
+
+I would **not** restart the pod first. Since the container is reachable internally, a restart is less likely to fix the root issue than checking backend health and routing first.
+
+If you paste the output of:
+
+* `backend-services get-health`
+* `backend-services describe`
+* `health-checks describe`
+
+I can help pinpoint it very quickly.
+
+[1]: https://docs.cloud.google.com/load-balancing/docs/https/troubleshooting-ext-https-lbs?utm_source=chatgpt.com "Troubleshoot issues with external Application Load ..."
+[2]: https://docs.cloud.google.com/compute/docs/reference/rest/v1/networkEndpointGroups/get?utm_source=chatgpt.com "Method: networkEndpointGroups.get | Compute Engine"
+[3]: https://docs.cloud.google.com/load-balancing/docs/health-checks?utm_source=chatgpt.com "Use health checks - Load Balancing"
+[4]: https://docs.cloud.google.com/load-balancing/docs/backend-service?utm_source=chatgpt.com "Backend services overview | Cloud Load Balancing"
+[5]: https://docs.cloud.google.com/load-balancing/docs/negs?utm_source=chatgpt.com "Network endpoint groups overview | Cloud Load Balancing"
+[6]: https://docs.cloud.google.com/load-balancing/docs/url-map?utm_source=chatgpt.com "Use URL maps - Load Balancing"
+[7]: https://docs.cloud.google.com/load-balancing/docs/l7-internal/troubleshooting-l7-ilb?utm_source=chatgpt.com "Troubleshoot issues with internal Application Load Balancers"
+[8]: https://docs.cloud.google.com/network-intelligence-center/docs/connectivity-tests/concepts/test-load-balancers?utm_source=chatgpt.com "Test connectivity to Google Cloud load balancers"
