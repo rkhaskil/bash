@@ -1,0 +1,20 @@
+POD=<pod>
+NS=<namespace>
+
+NODE=$(kubectl get pod "$POD" -n "$NS" -o jsonpath='{.spec.nodeName}')
+ZONE=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.topology\.kubernetes\.io/zone}')
+
+echo "Node=$NODE Zone=$ZONE"
+
+PROJECT=<project-containing-node>
+SQL_PROJECT=<project-containing-cloudsql>
+SQL_INSTANCE=<cloudsql-instance>
+VPC=<vpc-name>
+
+gcloud network-management connectivity-tests create gke-to-cloudsql \
+  --project="$PROJECT" \
+  --source-instance="projects/$PROJECT/zones/$ZONE/instances/$NODE" \
+  --destination-cloud-sql-instance="projects/$SQL_PROJECT/instances/$SQL_INSTANCE" \
+  --destination-network="projects/$PROJECT/global/networks/$VPC" \
+  --destination-port=5432 \
+  --protocol=tcp
