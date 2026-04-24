@@ -1,0 +1,8 @@
+$Gcloud = Get-Command -Name "gcloud.ps1" -ErrorAction SilentlyContinue
+
+if (-not $Gcloud) {
+    Write-Host "gcloud.ps1 is missing from PATH or not installed. Some scripts will not work." -ForegroundColor Red
+}
+else {
+    Write-Host "gcloud.ps1 found at: $($Gcloud.Source)" -ForegroundColor Green
+}
