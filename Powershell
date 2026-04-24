@@ -1,3 +1,48 @@
+I’d troubleshoot this by first proving what Get-Command is actually returning inside the script, not just interactively. This smells like either CommandType is not what the script expects, or Get-Command is returning more than one result.
+
+Thought for 15s
+
+The issue is likely not Get-Command itself. The script is saying “missing” because this condition is too broad:
+
+if ($Gcloud.CommandType -ne "ExternalScript")
+
+That only checks whether the command type is exactly ExternalScript. If PowerShell finds gcloud.ps1 but reports it as something else, or if multiple matches are returned, the check can behave differently than expected.
+
+Also, small typo: this should be -ForegroundColor, not -Foreground Color.
+
+Use this to troubleshoot inside the script:
+
+$Gcloud = Get-Command -Name "gcloud.ps1" -All -ErrorAction SilentlyContinue
+
+Write-Host "Gcloud result count: $($Gcloud.Count)"
+$Gcloud | Format-List Name,CommandType,Source,Definition,Path
+
+That will show you exactly what PowerShell is finding.
+
+A better version of the check would be:
+
+$Gcloud = Get-Command -Name "gcloud.ps1" -ErrorAction SilentlyContinue
+
+if (-not $Gcloud) {
+    Write-Host "gcloud.ps1 is missing from PATH or not installed. Some scripts will not work." -ForegroundColor Red
+}
+elseif ($Gcloud.CommandType -ne [System.Management.Automation.CommandTypes]::ExternalScript) {
+    Write-Host "gcloud.ps1 was found, but not as an ExternalScript." -ForegroundColor Yellow
+    Write-Host "Detected CommandType: $($Gcloud.CommandType)" -ForegroundColor Yellow
+    $Gcloud | Format-List Name,CommandType,Source,Definition,Path
+}
+else {
+    Write-Host "gcloud.ps1 found successfully: $($Gcloud.Source)" -ForegroundColor Green
+}
+
+I’d also run this manually:
+
+Get-Command -Name "gcloud.ps1" -All | Select-Object Name, CommandType, Source, Definition, Path
+
+You may find more than one result, or that PowerShell is returning something like Application instead of ExternalScript.
+
+For a simpler practical check, you may not even need to validate CommandType. If all you care about is whether PowerShell can find gcloud.ps1, this is enough:
+
 $Gcloud = Get-Command -Name "gcloud.ps1" -ErrorAction SilentlyContinue
 
 if (-not $Gcloud) {
@@ -6,3 +51,5 @@ if (-not $Gcloud) {
 else {
     Write-Host "gcloud.ps1 found at: $($Gcloud.Source)" -ForegroundColor Green
 }
+
+That’s probably the cleanest fix unless you specifically need to enforce that it must be a PowerShell script file.
