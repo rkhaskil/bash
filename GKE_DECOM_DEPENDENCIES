@@ -1,0 +1,74 @@
+Yes — that changes the scope a bit. They’re asking you to validate that the cluster is truly unused and has no downstream dependencies, not just identify what GKE will delete.
+
+I’d split the verification into two parts: what can be confirmed from the cluster/GCP side and what the application owner must attest to.
+
+For (a), you can technically validate whether the cluster still has workloads:
+
+# Workloads
+kubectl get deployments,statefulsets,daemonsets -A
+
+# Running pods
+kubectl get pods -A
+
+# Scheduled workloads
+kubectl get cronjobs -A
+kubectl get jobs -A
+
+# Services
+kubectl get svc -A
+
+# Ingress / Gateway
+kubectl get ingress -A
+kubectl get gateway -A
+kubectl get httproute -A
+
+Exclude normal GKE system namespaces such as kube-system when determining whether application workloads remain. You should specifically look for tenant/application namespaces containing Deployments, StatefulSets, standalone Pods, Jobs, CronJobs, Services, or other controllers.
+
+For (b), I'd validate the GCP-facing resources associated with the cluster:
+
+# Load balancer-related
+gcloud compute forwarding-rules list
+gcloud compute backend-services list
+gcloud compute network-endpoint-groups list
+
+# Reserved IP addresses
+gcloud compute addresses list
+
+# Firewall rules
+gcloud compute firewall-rules list
+
+# DNS
+gcloud dns managed-zones list
+gcloud dns record-sets list --zone=<ZONE>
+
+# Persistent disks
+gcloud compute disks list
+
+I'd also inspect:
+
+kubectl get svc -A
+kubectl get ingress -A
+kubectl get pvc,pv -A
+
+because these Kubernetes resources can reveal the GCP load balancers, IPs, NEGs, and storage that were created for the workloads.
+
+The important distinction is external application dependency. You generally cannot conclusively prove from the GKE cluster that nothing outside the cluster depends on it. For example, another application could have a cluster's internal load-balancer IP hard-coded in its configuration. So I would not personally attest to that portion without confirmation from the application owner.
+
+A response back to them could be:
+
+Prior to deletion, we can validate the GKE and GCP resources associated with the cluster to confirm that there are no remaining application workloads, scheduled jobs, services, load balancers, DNS records, or other infrastructure directly associated with the cluster.
+
+We will verify:
+
+No active application Deployments, StatefulSets, Pods, Jobs, or CronJobs remain in the cluster.
+No application Services, Ingress, Gateway, or load-balancer resources remain.
+No DNS records are pointing to cluster-hosted endpoints.
+No cluster-related forwarding rules, backend services, NEGs, static IPs, or firewall resources remain in use.
+No persistent storage or other resources associated with the application need to be retained.
+No monitoring integrations requiring the cluster remain.
+
+For external application dependencies, we can validate the infrastructure visible from the GKE/GCP side; however, the application/tenant owner should also confirm that no external applications, on-prem systems, integrations, or other consumers are still using endpoints provided by this cluster.
+
+Once both validations are complete, we can proceed with the cluster deletion.
+
+That last paragraph is the piece I would definitely keep. I wouldn't let your SRE/cloud team take sole ownership for declaring that there are "no external application dependencies." You can prove what exists in GCP; the tenant should confirm whether their applications are still consuming it.
