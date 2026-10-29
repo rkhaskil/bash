@@ -1,0 +1,11 @@
+Hey Boris, I wanted to follow up on something I brought up during our team meeting and see if you might have a contact within GNS who would be open to discussing it.
+
+One issue I run into fairly often is troubleshooting connectivity between GCP and on-prem resources. We'll have a tenant report a connectivity issue, and after reviewing the GCP side, we can confirm traffic is allowed through the firewall and sometimes even see it traversing the interconnect. At that point, we typically refer the tenant to GNS, who may report that they don't see the traffic or that everything looks fine on their end.
+
+This can turn into a lot of back-and-forth, with the tenant essentially acting as the middleman between the two teams. I usually recommend getting everyone on a Teams call to troubleshoot together, but tenants sometimes have difficulty coordinating that with GNS.
+
+I completely understand that GNS has their own workload and processes, and I'm not looking to point fingers at either team. I just think there's an opportunity to improve how we collaborate on these issues and hopefully reduce resolution times.
+
+A couple of ideas would be establishing a direct communication or escalation channel between Cloud Reliability and GNS, or potentially exploring limited read-only access to relevant on-prem firewall logs.
+
+Do you happen to know anyone within GNS who might be willing to have a conversation about this? I'd be happy to take the initiative and work with them to explore some options. I think even a small improvement here could make a big difference for our tenants and both teams.
