@@ -1,0 +1,310 @@
+# GSP517: Develop GenAI Apps with Gemini and Streamlit - Challenge Lab
+
+A step-by-step guide for completing the Google Cloud Skills Boost challenge lab using Cloud Shell, Vertex AI Workbench, Streamlit, Artifact Registry, Cloud Build, and Cloud Run.
+
+> **Important:** Google updates challenge labs. Always use the project ID, region, model ID, file paths, and any required resource names specified in **your current lab instructions**. This guide follows the task structure discussed on November 12, 2026.
+
+## Completion checklist
+
+- [ ] Task 1: Test the Gemini API using cURL (15 points)
+- [ ] Task 2: Complete `chef.py` and its Streamlit interface (25 points)
+- [ ] Task 3: Test the Streamlit application in Cloud Shell (20 points)
+- [ ] Task 4: Build and push the Docker image (20 points)
+- [ ] Task 5: Deploy and test the Cloud Run application (20 points)
+
+## Prerequisites
+
+1. Start the lab and sign in with its temporary Google Cloud credentials.
+2. Open **Cloud Shell** in the assigned project.
+3. Record the assigned **project ID**, **region**, and **Gemini Flash model ID** from the lab.
+4. Run:
+
+```bash
+export PROJECT=$(gcloud config get-value project)
+echo "PROJECT=$PROJECT"
+gcloud auth list
+```
+
+Set the region, replacing `us-central1` with the **region provided by your lab**:
+
+```bash
+export REGION="us-central1"
+echo "REGION=$REGION"
+```
+
+## Task 1: Test Gemini using cURL
+
+1. Navigate to **Agent Platform -> Notebooks -> Workbench** (or **Vertex AI -> Workbench**, depending on the console layout).
+2. Open the existing Workbench instance's **JupyterLab**.
+3. Open `prompt.ipynb`.
+4. Select the **Python 3 (Local)** kernel.
+5. Check the project and location configuration in cell 3.
+6. In cell 5, keep the existing cURL/API structure and replace the *prompt text* with:
+
+```text
+I am a Chef. I need to create Japanese recipes for customers who want low sodium meals. However, I do not want to include recipes that use ingredients associated with a peanuts food allergy. I have ahi tuna, fresh ginger, and edamame in my kitchen and other ingredients. The customer wine preference is red. Please provide some for meal recommendations. For each recommendation include preparation instructions, time to prepare and the recipe title at the beginning of the response. Then include the wine paring for each recommendation. At the end of the recommendation provide the calories associated with the meal and the nutritional facts.
+```
+
+7. Run the notebook cells in order, confirm that Gemini returns a response, and save with **Ctrl+S**.
+8. Click **Check my progress** for Task 1.
+
+**Troubleshooting:** For an API `404`, verify that cell 3 ran and uses the correct assigned region and model endpoint.
+
+## Task 2: Complete the `chef.py` Streamlit application
+
+### 2.1 Clone the sample repository
+
+In Cloud Shell:
+
+```bash
+cd ~
+git clone https://github.com/GoogleCloudPlatform/generative-ai.git
+cd generative-ai/gemini/sample-apps/gemini-streamlit-cloudrun
+pwd
+```
+
+Expected directory:
+
+```text
+~/generative-ai/gemini/sample-apps/gemini-streamlit-cloudrun
+```
+
+### 2.2 Add Cloud Logging dependency
+
+```bash
+grep -qxF 'google-cloud-logging' requirements.txt || echo 'google-cloud-logging' >> requirements.txt
+cat requirements.txt
+```
+
+Keep the other existing dependencies.
+
+### 2.3 Download the Chef starter file
+
+Use the **source path specified in the live lab**. If it specifies the following location:
+
+```bash
+gcloud storage cp gs://spls/gsp517/chef.py .
+ls -l chef.py
+```
+
+If that object does not exist, refer back to your lab instructions rather than guessing a new path.
+
+### 2.4 Update configuration in `chef.py`
+
+Open the file:
+
+```bash
+cloudshell edit chef.py
+```
+
+Replace the placeholders for `GCP_PROJECT_ID` and `GEMINI_FLASH_MODEL_ID` with the **project ID** and **Gemini Flash model ID** specified in your lab. Preserve the rest of the starter application's structure.
+
+### 2.5 Add a wine preference radio button
+
+After the third ingredient input widget, insert:
+
+```python
+wine = st.radio(
+    "What wine do you prefer?",
+    ("Red", "White", "None"),
+    key="wine",
+    horizontal=True
+)
+```
+
+### 2.6 Update the Gemini prompt
+
+Locate the existing `prompt` assignment and update its value to incorporate the existing widget variables plus `wine`:
+
+```python
+prompt = f"""I am a Chef. I need to create {cuisine}
+recipes for customers who want {dietary_preference} meals.
+However, don't include recipes that use ingredients with the customer's {allergy} allergy.
+I have {ingredient_1},
+{ingredient_2},
+and {ingredient_3}
+in my kitchen and other ingredients.
+The customer's wine preference is {wine}
+Please provide some for meal recommendations.
+For each recommendation include preparation instructions,
+time to prepare and the recipe title at the beginning of the response.
+Then include the wine paring for each recommendation.
+At the end of the recommendation provide the calories associated with the meal and the nutritional facts.
+"""
+```
+
+**Note:** These variable names must match the ones in the starter file. In an f-string, expressions such as `{cuisine}` and `{wine}` are replaced with the user's selections at runtime.
+
+### 2.7 Validate and upload
+
+```bash
+python3 -m py_compile chef.py
+
+gcloud storage cp chef.py "gs://${PROJECT}-generative-ai/"
+```
+
+Click **Check my progress** for Task 2. If you later edit `chef.py`, upload the new file again.
+
+## Task 3: Test Streamlit in Cloud Shell
+
+### 3.1 Create a Python environment and install dependencies
+
+In the application directory:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+If `chef.py` imports an unavailable package, add the required library to `requirements.txt` and reinstall it. For example, implementations importing `vertexai` generally require `google-cloud-aiplatform`.
+
+### 3.2 Configure environment variables
+
+```bash
+export GCP_PROJECT="$PROJECT"
+export GCP_REGION="$REGION"
+export GOOGLE_CLOUD_PROJECT="$PROJECT"
+export GOOGLE_CLOUD_LOCATION="$REGION"
+
+echo "$PROJECT"
+echo "$REGION"
+```
+
+### 3.3 Start the application
+
+```bash
+streamlit run chef.py \
+  --server.address=0.0.0.0 \
+  --server.port=8080 \
+  --server.headless=true
+```
+
+### 3.4 Test in Web Preview
+
+1. Click **Web Preview** at the top of Cloud Shell.
+2. Select **Preview on port 8080**.
+3. Confirm the Chef interface loads.
+4. Select cuisine, dietary preference, ingredients, allergy, and wine.
+5. Click the recipe generation button and verify that Gemini responds.
+6. Click **Check my progress** for Task 3.
+7. Return to the terminal and press **Ctrl+C** to stop the local server.
+
+## Task 4: Build and push a Docker image
+
+### 4.1 Update the Dockerfile
+
+Ensure the application launches **`chef.py`** on port **8080**. One suitable Dockerfile is:
+
+```dockerfile
+FROM python:3.13-slim
+
+EXPOSE 8080
+WORKDIR /app
+COPY . ./
+RUN pip install --no-cache-dir -r requirements.txt
+ENTRYPOINT ["streamlit", "run", "chef.py", "--server.port=8080", "--server.address=0.0.0.0"]
+```
+
+Keep the starter Dockerfile instead if your version of the lab explicitly requires different build instructions or a supported Python version.
+
+Exclude the virtual environment from the build context:
+
+```bash
+echo ".venv" >> .dockerignore
+```
+
+### 4.2 Configure names
+
+```bash
+export AR_REPO="chef-repo"
+export SERVICE_NAME="chef-streamlit-app"
+echo "$AR_REPO"
+echo "$SERVICE_NAME"
+```
+
+If the lab specifies different resource names, use those names consistently.
+
+### 4.3 Create Artifact Registry repository
+
+```bash
+gcloud artifacts repositories create "$AR_REPO" \
+  --repository-format=docker \
+  --location="$REGION" \
+  --description="Chef Streamlit application images"
+```
+
+An `ALREADY_EXISTS` message means you can continue with the existing repository.
+
+### 4.4 Build and push with Cloud Build
+
+```bash
+gcloud builds submit \
+  --tag "${REGION}-docker.pkg.dev/${PROJECT}/${AR_REPO}/${SERVICE_NAME}" \
+  .
+```
+
+Wait for `SUCCESS`, then verify the image:
+
+```bash
+gcloud artifacts docker images list \
+  "${REGION}-docker.pkg.dev/${PROJECT}/${AR_REPO}"
+```
+
+Click **Check my progress** for Task 4.
+
+## Task 5: Deploy the application to Cloud Run
+
+### 5.1 Deploy
+
+```bash
+gcloud run deploy "$SERVICE_NAME" \
+  --image="${REGION}-docker.pkg.dev/${PROJECT}/${AR_REPO}/${SERVICE_NAME}" \
+  --port=8080 \
+  --region="$REGION" \
+  --project="$PROJECT" \
+  --platform=managed \
+  --allow-unauthenticated \
+  --set-env-vars="PROJECT=${PROJECT},REGION=${REGION},GCP_PROJECT=${PROJECT},GCP_REGION=${REGION},GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=${REGION}"
+```
+
+This command requests a public endpoint for the temporary lab app. Confirm that this is allowed by the lab instructions before using it outside the lab environment.
+
+If prompted to enable APIs, answer `Y` as instructed in the lab.
+
+### 5.2 Retrieve the URL
+
+```bash
+gcloud run services describe "$SERVICE_NAME" \
+  --region="$REGION" \
+  --project="$PROJECT" \
+  --format="value(status.url)"
+```
+
+### 5.3 Test and check progress
+
+1. Open the Cloud Run URL.
+2. Confirm the interface, including the wine radio button, loads.
+3. Generate recipes and verify that Gemini returns a response.
+4. Click **Check my progress** for Task 5.
+
+## Troubleshooting quick reference
+
+| Symptom | What to verify |
+| --- | --- |
+| Gemini `404 Not Found` | Correct model ID, assigned region, and API endpoint. |
+| `ModuleNotFoundError` | Missing dependency in `requirements.txt`; reinstall or rebuild. |
+| `403 Permission Denied` | Correct temporary account, selected project, API enablement, and IAM permissions. |
+| `chef.py: No such file` | Correct working directory and starter-file download path. |
+| Cloud Run startup failure | Docker entrypoint runs `chef.py`; process listens on `0.0.0.0:8080`. |
+| Task 2 grader fails | Re-upload the latest `chef.py` to the specified lab bucket. |
+| Task 4 grader fails | Confirm the exact repo, image, and region required by the lab. |
+
+## References
+
+- [Google Cloud Skills Boost: GSP517](https://www.skills.google/focuses/87315?parent=catalog)
+- [GoogleCloudPlatform/generative-ai sample apps](https://github.com/GoogleCloudPlatform/generative-ai/tree/main/gemini/sample-apps/gemini-streamlit-cloudrun)
+
+---
+
+*For personal study use. Challenge lab instructions may change, and this guide is not a substitute for the task-specific requirements displayed during your session.*
