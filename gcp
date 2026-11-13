@@ -1,310 +1,399 @@
-# GSP517: Develop GenAI Apps with Gemini and Streamlit - Challenge Lab
+GCP LAB WALKTHROUGH
+Build a Smart Cloud Application with Vibe Coding and MCP
+========================================================
 
-A step-by-step guide for completing the Google Cloud Skills Boost challenge lab using Cloud Shell, Vertex AI Workbench, Streamlit, Artifact Registry, Cloud Build, and Cloud Run.
+PURPOSE
+-------
+Complete the Google Cloud Skills lab: set up Google Cloud services,
+repair and test a Python MCP server, deploy it to Cloud Run, connect
+Antigravity (agy), then test and deploy the zoo guide ADK agent.
 
-> **Important:** Google updates challenge labs. Always use the project ID, region, model ID, file paths, and any required resource names specified in **your current lab instructions**. This guide follows the task structure discussed on November 12, 2026.
+IMPORTANT
+---------
+* Use your temporary lab account and the project ID assigned by the lab.
+* The lab may specify exact REGION, MODEL, MCP_SERVICE, and ADK_SERVICE
+  values. Use those values, not generic examples.
+* The lab-provided starter code is authoritative. Do not blindly replace
+  its files or overwrite implemented functions.
+* Run shell commands in Cloud Shell, NOT inside an agy prompt, unless
+  the directions specifically say to enter a prompt or slash command.
+* Lab temporary credentials expire. Avoid adding tokens to Git.
 
-## Completion checklist
+========================================================
+TASK 1: INITIAL SETUP AND REQUIRED APIS
+========================================================
 
-- [ ] Task 1: Test the Gemini API using cURL (15 points)
-- [ ] Task 2: Complete `chef.py` and its Streamlit interface (25 points)
-- [ ] Task 3: Test the Streamlit application in Cloud Shell (20 points)
-- [ ] Task 4: Build and push the Docker image (20 points)
-- [ ] Task 5: Deploy and test the Cloud Run application (20 points)
+1. Open the Google Cloud Console with the lab student credentials.
+   Open Cloud Shell.
 
-## Prerequisites
+2. Record the project information:
 
-1. Start the lab and sign in with its temporary Google Cloud credentials.
-2. Open **Cloud Shell** in the assigned project.
-3. Record the assigned **project ID**, **region**, and **Gemini Flash model ID** from the lab.
-4. Run:
+   export PROJECT_ID=$(gcloud config get-value project)
+   export PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format="value(projectNumber)")
+   echo "PROJECT_ID=$PROJECT_ID"
+   echo "PROJECT_NUMBER=$PROJECT_NUMBER"
 
-```bash
-export PROJECT=$(gcloud config get-value project)
-echo "PROJECT=$PROJECT"
-gcloud auth list
-```
+3. Download the provided lab files:
 
-Set the region, replacing `us-central1` with the **region provided by your lab**:
+   cd ~
+   gcloud storage cp gs://${PROJECT_ID}-labconfig-bucket/labs_code.zip .
+   unzip -o labs_code.zip
+   ls ~/mcp-on-cloudrun
+   ls ~/zoo_guide_agent
 
-```bash
-export REGION="us-central1"
-echo "REGION=$REGION"
-```
+   Expected folders:
+   ~/mcp-on-cloudrun/    (server.py, local_mcp_call.py, etc.)
+   ~/zoo_guide_agent/   (agent.py, __init__.py, requirements.txt)
 
-## Task 1: Test Gemini using cURL
+4. Set the exact configuration values shown in YOUR lab:
 
-1. Navigate to **Agent Platform -> Notebooks -> Workbench** (or **Vertex AI -> Workbench**, depending on the console layout).
-2. Open the existing Workbench instance's **JupyterLab**.
-3. Open `prompt.ipynb`.
-4. Select the **Python 3 (Local)** kernel.
-5. Check the project and location configuration in cell 3.
-6. In cell 5, keep the existing cURL/API structure and replace the *prompt text* with:
+   export REGION="REPLACE_WITH_LAB_REGION"
+   export MODEL="REPLACE_WITH_LAB_MODEL"
+   export MCP_SERVICE="REPLACE_WITH_LAB_MCP_SERVICE_NAME"
+   export ADK_SERVICE="REPLACE_WITH_LAB_ADK_SERVICE_NAME"
 
-```text
-I am a Chef. I need to create Japanese recipes for customers who want low sodium meals. However, I do not want to include recipes that use ingredients associated with a peanuts food allergy. I have ahi tuna, fresh ginger, and edamame in my kitchen and other ingredients. The customer wine preference is red. Please provide some for meal recommendations. For each recommendation include preparation instructions, time to prepare and the recipe title at the beginning of the response. Then include the wine paring for each recommendation. At the end of the recommendation provide the calories associated with the meal and the nutritional facts.
-```
+   Note: The lab may use different variable names. Follow the lab when
+   it gives explicit names/values.
 
-7. Run the notebook cells in order, confirm that Gemini returns a response, and save with **Ctrl+S**.
-8. Click **Check my progress** for Task 1.
+5. Enable APIs:
 
-**Troubleshooting:** For an API `404`, verify that cell 3 ran and uses the correct assigned region and model endpoint.
+   gcloud services enable \
+     aiplatform.googleapis.com \
+     artifactregistry.googleapis.com \
+     compute.googleapis.com \
+     cloudbuild.googleapis.com \
+     run.googleapis.com \
+     --project="$PROJECT_ID"
 
-## Task 2: Complete the `chef.py` Streamlit application
+6. In the Skills lab page, click Check my progress for the API task.
 
-### 2.1 Clone the sample repository
+========================================================
+TASK 2: REPAIR, TEST, AND DEPLOY THE MCP SERVER
+========================================================
 
-In Cloud Shell:
+1. Reproduce the deliberate Python error:
 
-```bash
-cd ~
-git clone https://github.com/GoogleCloudPlatform/generative-ai.git
-cd generative-ai/gemini/sample-apps/gemini-streamlit-cloudrun
-pwd
-```
+   cd ~/mcp-on-cloudrun
+   uv run --python 3.13 server.py
 
-Expected directory:
+   A typical error is:
+   NameError: name 'mcp' is not defined
 
-```text
-~/generative-ai/gemini/sample-apps/gemini-streamlit-cloudrun
-```
+2. Launch Antigravity CLI:
 
-### 2.2 Add Cloud Logging dependency
+   cd ~/mcp-on-cloudrun
+   agy
 
-```bash
-grep -qxF 'google-cloud-logging' requirements.txt || echo 'google-cloud-logging' >> requirements.txt
-cat requirements.txt
-```
+   Sign in/configure it using the lab-provided project and account.
+   If you run into an organization policy restriction, select a model
+   authorized for that lab instead of changing organization policies.
 
-Keep the other existing dependencies.
+3. Tell agy to modify the code, not merely describe the change:
 
-### 2.3 Download the Chef starter file
+   Open server.py. Fix the NameError involving 'mcp'. Apply the fix
+   directly to the server.py file on disk. Show me the changed lines.
 
-Use the **source path specified in the live lab**. If it specifies the following location:
+   IMPORTANT:
+   * Approve a requested FILE EDIT if it is the intended change.
+   * You do NOT need agy to run server.py while editing it.
+   * If agy asks to execute the repaired file, cancel that action
+     (Esc) and test it yourself in Cloud Shell after saving the edit.
 
-```bash
-gcloud storage cp gs://spls/gsp517/chef.py .
-ls -l chef.py
-```
+4. Exit agy and inspect the result:
 
-If that object does not exist, refer back to your lab instructions rather than guessing a new path.
+   /quit                       (enter INSIDE agy)
 
-### 2.4 Update configuration in `chef.py`
+   cd ~/mcp-on-cloudrun        (enter in Cloud Shell)
+   grep -nE 'FastMCP|mcp|TODO' server.py
+   python3 -m py_compile server.py
 
-Open the file:
+   If the file was not modified, inspect the original code:
 
-```bash
-cloudshell edit chef.py
-```
+   sed -n '1,180p' ~/mcp-on-cloudrun/server.py
 
-Replace the placeholders for `GCP_PROJECT_ID` and `GEMINI_FLASH_MODEL_ID` with the **project ID** and **Gemini Flash model ID** specified in your lab. Preserve the rest of the starter application's structure.
+   The server must instantiate an MCP object before using it.
+   The precise fix depends on the file's imports and code structure.
+   For example, a FastMCP-based project may require initialization
+   similar to 'mcp = FastMCP("zoo-server")', but DO NOT insert that
+   blindly without checking the existing code and dependencies.
 
-### 2.5 Add a wine preference radio button
+5. Start the repaired server in the FIRST Cloud Shell terminal:
 
-After the third ingredient input widget, insert:
+   cd ~/mcp-on-cloudrun
+   uv run --python 3.13 server.py
 
-```python
-wine = st.radio(
-    "What wine do you prefer?",
-    ("Red", "White", "None"),
-    key="wine",
-    horizontal=True
-)
-```
+   Leave the server running.
 
-### 2.6 Update the Gemini prompt
+6. Open a SECOND Cloud Shell terminal and test it:
 
-Locate the existing `prompt` assignment and update its value to incorporate the existing widget variables plus `wine`:
+   cd ~/mcp-on-cloudrun
+   uv run --python 3.13 local_mcp_call.py
 
-```python
-prompt = f"""I am a Chef. I need to create {cuisine}
-recipes for customers who want {dietary_preference} meals.
-However, don't include recipes that use ingredients with the customer's {allergy} allergy.
-I have {ingredient_1},
-{ingredient_2},
-and {ingredient_3}
-in my kitchen and other ingredients.
-The customer's wine preference is {wine}
-Please provide some for meal recommendations.
-For each recommendation include preparation instructions,
-time to prepare and the recipe title at the beginning of the response.
-Then include the wine paring for each recommendation.
-At the end of the recommendation provide the calories associated with the meal and the nutritional facts.
-"""
-```
+   Look for a successful MCP tool response with animal data.
+   If the script errors, capture the traceback before proceeding.
 
-**Note:** These variable names must match the ones in the starter file. In an f-string, expressions such as `{cuisine}` and `{wine}` are replaced with the user's selections at runtime.
+7. Return to the first terminal and stop the local server (Ctrl+C).
+   Deploy the MCP server to Cloud Run:
 
-### 2.7 Validate and upload
+   cd ~/mcp-on-cloudrun
+   gcloud run deploy "$MCP_SERVICE" \
+     --no-allow-unauthenticated \
+     --region="$REGION" \
+     --source=. \
+     --min=1 \
+     --set-env-vars=FASTMCP_STATELESS_HTTP=true \
+     --project="$PROJECT_ID" \
+     --labels=lab-dev=mcp-zoo-cloud-run-service
 
-```bash
-python3 -m py_compile chef.py
+8. Verify the service URL:
 
-gcloud storage cp chef.py "gs://${PROJECT}-generative-ai/"
-```
+   export MCP_BASE_URL=$(gcloud run services describe "$MCP_SERVICE" \
+     --region="$REGION" --format='value(status.url)')
+   echo "$MCP_BASE_URL"
 
-Click **Check my progress** for Task 2. If you later edit `chef.py`, upload the new file again.
+9. Click the appropriate Check my progress buttons for the local MCP
+   test and MCP Cloud Run deployment.
 
-## Task 3: Test Streamlit in Cloud Shell
+========================================================
+TASK 3: CONNECT ANTIGRAVITY TO THE REMOTE MCP SERVER
+========================================================
 
-### 3.1 Create a Python environment and install dependencies
+1. Obtain the deployed MCP URL:
 
-In the application directory:
+   export MCP_BASE_URL=$(gcloud run services describe "$MCP_SERVICE" \
+     --region="$REGION" --format='value(status.url)')
+   echo "$MCP_BASE_URL"
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-```
+2. For private Cloud Run, an authenticated caller needs permission
+   (typically Cloud Run Invoker) and a valid identity token.
+   Follow the exact authentication method in your lab. If your lab
+   calls for a local token, the example is:
 
-If `chef.py` imports an unavailable package, add the required library to `requirements.txt` and reinstall it. For example, implementations importing `vertexai` generally require `google-cloud-aiplatform`.
+   export ID_TOKEN=$(gcloud auth print-identity-token \
+     --audiences="$MCP_BASE_URL")
 
-### 3.2 Configure environment variables
+   NOTE: This token command depends on the active credential type.
+   Some user credentials cannot mint a token with a custom audience.
+   If the command fails, do not paste credentials into chat; check
+   the lab's service-account/impersonation instructions.
 
-```bash
-export GCP_PROJECT="$PROJECT"
-export GCP_REGION="$REGION"
-export GOOGLE_CLOUD_PROJECT="$PROJECT"
-export GOOGLE_CLOUD_LOCATION="$REGION"
+3. If your lab uses the following Antigravity MCP config path, create it:
 
-echo "$PROJECT"
-echo "$REGION"
-```
+   mkdir -p ~/.gemini/config
+   cat > ~/.gemini/config/mcp_config.json <<EOF_JSON
+   {
+     "mcpServers": {
+       "zoo-remote": {
+         "serverUrl": "${MCP_BASE_URL}/mcp/",
+         "headers": {
+           "Authorization": "Bearer ${ID_TOKEN}"
+         }
+       }
+     }
+   }
+   EOF_JSON
 
-### 3.3 Start the application
+   IMPORTANT: Use the MCP configuration path and schema required by
+   the version of agy supplied in your lab if they differ.
 
-```bash
-streamlit run chef.py \
-  --server.address=0.0.0.0 \
-  --server.port=8080 \
-  --server.headless=true
-```
+4. Validate JSON syntax:
 
-### 3.4 Test in Web Preview
+   python3 -m json.tool ~/.gemini/config/mcp_config.json
 
-1. Click **Web Preview** at the top of Cloud Shell.
-2. Select **Preview on port 8080**.
-3. Confirm the Chef interface loads.
-4. Select cuisine, dietary preference, ingredients, allergy, and wine.
-5. Click the recipe generation button and verify that Gemini responds.
-6. Click **Check my progress** for Task 3.
-7. Return to the terminal and press **Ctrl+C** to stop the local server.
+5. Start agy and inspect MCP connections:
 
-## Task 4: Build and push a Docker image
+   agy
+   /mcp
 
-### 4.1 Update the Dockerfile
+   Find the configured remote server and its available tools.
+   Try a prompt such as:
 
-Ensure the application launches **`chef.py`** on port **8080**. One suitable Dockerfile is:
+   Where can I find penguins?
 
-```dockerfile
-FROM python:3.13-slim
+   If the lab includes a custom /find command, test its documented
+   syntax (for example: /find --animal="lion").
 
-EXPOSE 8080
-WORKDIR /app
-COPY . ./
-RUN pip install --no-cache-dir -r requirements.txt
-ENTRYPOINT ["streamlit", "run", "chef.py", "--server.port=8080", "--server.address=0.0.0.0"]
-```
+6. Inspect MCP Cloud Run logs in Cloud Shell:
 
-Keep the starter Dockerfile instead if your version of the lab explicitly requires different build instructions or a supported Python version.
+   gcloud run services logs read "$MCP_SERVICE" \
+     --region="$REGION" --limit=20
 
-Exclude the virtual environment from the build context:
+7. Click Check my progress for the MCP integration checkpoint.
 
-```bash
-echo ".venv" >> .dockerignore
-```
+========================================================
+TASK 4: ADD GOOGLE SEARCH TO THE ADK ZOO GUIDE AGENT
+========================================================
 
-### 4.2 Configure names
+1. Inspect the provided code FIRST:
 
-```bash
-export AR_REPO="chef-repo"
-export SERVICE_NAME="chef-streamlit-app"
-echo "$AR_REPO"
-echo "$SERVICE_NAME"
-```
+   cd ~/zoo_guide_agent
+   cp agent.py agent.py.bak
+   grep -nE 'TODO|Agent\(|tools=|root_agent|google_search' agent.py
+   cloudshell edit agent.py
 
-If the lab specifies different resource names, use those names consistently.
+2. Complete only the TODO sections expected by the lab. Keep existing
+   agent definitions, tool configuration, research/formatting behavior,
+   and environment-variable names consistent.
 
-### 4.3 Create Artifact Registry repository
+   A common ADK search-tool pattern uses these imports:
 
-```bash
-gcloud artifacts repositories create "$AR_REPO" \
-  --repository-format=docker \
-  --location="$REGION" \
-  --description="Chef Streamlit application images"
-```
+   from google.adk.tools import google_search
+   from google.adk.tools.agent_tool import AgentTool
 
-An `ALREADY_EXISTS` message means you can continue with the existing repository.
+   For ADK versions where a built-in Google Search tool cannot be
+   mixed directly with other functions or MCP tools on one agent,
+   create a dedicated search subagent and expose it as an AgentTool.
+   Example SHAPE ONLY (the variable 'model_name' must match your file):
 
-### 4.4 Build and push with Cloud Build
+   search_agent = Agent(
+       name="google_search_specialist",
+       model=model_name,
+       description="Find current wildlife information",
+       instruction="Use Google Search for current animal information.",
+       tools=[google_search],
+   )
+   search_tool = AgentTool(agent=search_agent)
 
-```bash
-gcloud builds submit \
-  --tag "${REGION}-docker.pkg.dev/${PROJECT}/${AR_REPO}/${SERVICE_NAME}" \
-  .
-```
+   Add search_tool to the EXISTING researcher's tools list. Do not
+   replace its existing MCP tools or overwrite the agent architecture.
+   Update the researcher instructions to clarify when search is used.
 
-Wait for `SUCCESS`, then verify the image:
+   NOTE: This snippet is illustrative, not a copy/paste complete
+   agent.py. The actual starter file determines the exact edits.
 
-```bash
-gcloud artifacts docker images list \
-  "${REGION}-docker.pkg.dev/${PROJECT}/${AR_REPO}"
-```
+3. Inspect/create the lab-required environment variables:
 
-Click **Check my progress** for Task 4.
+   cd ~/zoo_guide_agent
+   ls -la .env
 
-## Task 5: Deploy the application to Cloud Run
+   Typical values in a lab-provided .env may include:
 
-### 5.1 Deploy
+   MODEL="YOUR_LAB_MODEL"
+   GOOGLE_CLOUD_PROJECT="YOUR_PROJECT_ID"
+   GOOGLE_CLOUD_LOCATION=global
+   MCP_SERVER_URL="https://YOUR_MCP_SERVICE_URL/mcp/"
 
-```bash
-gcloud run deploy "$SERVICE_NAME" \
-  --image="${REGION}-docker.pkg.dev/${PROJECT}/${AR_REPO}/${SERVICE_NAME}" \
-  --port=8080 \
-  --region="$REGION" \
-  --project="$PROJECT" \
-  --platform=managed \
-  --allow-unauthenticated \
-  --set-env-vars="PROJECT=${PROJECT},REGION=${REGION},GCP_PROJECT=${PROJECT},GCP_REGION=${REGION},GOOGLE_CLOUD_PROJECT=${PROJECT},GOOGLE_CLOUD_LOCATION=${REGION}"
-```
+   Do not replace a provided .env without checking it first. Some
+   versions use extra variables for service accounts and Gemini.
 
-This command requests a public endpoint for the temporary lab app. Confirm that this is allowed by the lab instructions before using it outside the lab environment.
+4. Install Python dependencies:
 
-If prompted to enable APIs, answer `Y` as instructed in the lab.
+   cd ~/zoo_guide_agent
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install --no-cache-dir -r requirements.txt
 
-### 5.2 Retrieve the URL
+   Run a syntax check:
+   python -m py_compile agent.py
 
-```bash
-gcloud run services describe "$SERVICE_NAME" \
-  --region="$REGION" \
-  --project="$PROJECT" \
-  --format="value(status.url)"
-```
+5. Run ADK locally from the PARENT folder:
 
-### 5.3 Test and check progress
+   cd ~
+   adk web
 
-1. Open the Cloud Run URL.
-2. Confirm the interface, including the wine radio button, loads.
-3. Generate recipes and verify that Gemini returns a response.
-4. Click **Check my progress** for Task 5.
+   Open Cloud Shell's Web Preview (usually port 8000).
+   Select zoo_guide_agent and ask:
 
-## Troubleshooting quick reference
+   Where can I find bears?
 
-| Symptom | What to verify |
-| --- | --- |
-| Gemini `404 Not Found` | Correct model ID, assigned region, and API endpoint. |
-| `ModuleNotFoundError` | Missing dependency in `requirements.txt`; reinstall or rebuild. |
-| `403 Permission Denied` | Correct temporary account, selected project, API enablement, and IAM permissions. |
-| `chef.py: No such file` | Correct working directory and starter-file download path. |
-| Cloud Run startup failure | Docker entrypoint runs `chef.py`; process listens on `0.0.0.0:8080`. |
-| Task 2 grader fails | Re-upload the latest `chef.py` to the specified lab bucket. |
-| Task 4 grader fails | Confirm the exact repo, image, and region required by the lab. |
+   Check the events/tool traces. The response should draw on the
+   tools relevant to the question. Fix local errors before deploying.
 
-## References
+6. Stop the local ADK server (Ctrl+C). Deploy to Cloud Run:
 
-- [Google Cloud Skills Boost: GSP517](https://www.skills.google/focuses/87315?parent=catalog)
-- [GoogleCloudPlatform/generative-ai sample apps](https://github.com/GoogleCloudPlatform/generative-ai/tree/main/gemini/sample-apps/gemini-streamlit-cloudrun)
+   cd ~/zoo_guide_agent
+   adk deploy cloud_run \
+     --project="$PROJECT_ID" \
+     --region="$REGION" \
+     --service_name="$ADK_SERVICE" \
+     --with_ui \
+     . \
+     -- \
+     --labels=lab-dev=cloud-zoo-run-adk-service \
+     --allow-unauthenticated
 
----
+   Keep the exact labels/settings specified by the current lab.
 
-*For personal study use. Challenge lab instructions may change, and this guide is not a substitute for the task-specific requirements displayed during your session.*
+7. Get the deployed UI URL:
+
+   gcloud run services describe "$ADK_SERVICE" \
+     --region="$REGION" --format='value(status.url)'
+
+8. Open the URL, select zoo_guide_agent, and test:
+
+   Where can I find elephants?
+
+   If specified by the lab, turn Token Streaming OFF during testing.
+   Verify the agent completes tool calls and gives a useful answer.
+
+9. Click all remaining Check my progress buttons:
+   * ADK local test
+   * ADK Cloud Run deployment
+   * Deployed agent verification
+
+========================================================
+TROUBLESHOOTING
+========================================================
+
+A. AGY SAYS IT FIXED SERVER.PY BUT THE NAMEERROR REMAINS
+
+   1. Exit agy.
+   2. Inspect the file:
+      grep -nE 'FastMCP|mcp|TODO' ~/mcp-on-cloudrun/server.py
+   3. Run:
+      cd ~/mcp-on-cloudrun
+      uv run --python 3.13 server.py
+   4. If it still fails, paste the traceback and relevant
+      server.py code into ChatGPT. We can fix the exact lines.
+
+B. ORGANIZATION POLICY CONSTRAINT IN AGY
+
+   Verify the lab account, project selection, enabled APIs, and
+   approved model. Acknowledge that the organization may restrict
+   which model can be used. Do not modify/bypass the policy.
+
+C. HTTP 403 WHEN CALLING MCP ON CLOUD RUN
+
+   Check that the caller has 'roles/run.invoker' and sends the right
+   identity token for the correct service URL. Check the actual
+   deployed service URL with 'gcloud run services describe'.
+
+D. ADK IMPORT ERROR OR MODULE NOT FOUND
+
+   Use the agent's virtual environment and install requirements.txt.
+   Run 'adk web' from the parent of zoo_guide_agent.
+
+E. CLOUD RUN DEPLOYMENT SUCCEEDS BUT AGENT FAILS
+
+   gcloud run services logs read "$ADK_SERVICE" \
+     --region="$REGION" --limit=30
+
+   Review application tracebacks, service account permissions,
+   model availability, and access to the MCP server.
+
+F. CLOUD SHELL SESSION LOSES VARIABLE VALUES
+
+   Re-export PROJECT_ID, PROJECT_NUMBER, REGION, MODEL,
+   MCP_SERVICE, and ADK_SERVICE before retrying commands.
+
+========================================================
+FINAL CHECKLIST
+========================================================
+
+[ ] Lab project and credentials verified
+[ ] Required APIs enabled
+[ ] server.py successfully repaired
+[ ] MCP server tested locally
+[ ] MCP server deployed to Cloud Run
+[ ] Antigravity can access remote MCP tools
+[ ] ADK agent updated to use Google Search
+[ ] ADK agent tested locally
+[ ] ADK agent deployed to Cloud Run
+[ ] Deployed ADK agent verified
+[ ] All available Check my progress checks passed
+
+Reference lab:
+https://www.skills.google/focuses/132620?parent=catalog
+
+Prepared as a portable plain-text walkthrough. Follow the lab's
+current on-screen instructions whenever they differ from this guide.
