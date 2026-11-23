@@ -2,6 +2,7 @@
 #SingleInstance Force
 
 ; Ctrl + Alt + G inserts an editable two-column network table in desktop OneNote.
+; v5: preserve the visually blank second column across different paste handlers.
 ; Click on a blank line OUTSIDE an existing table before using the shortcut.
 
 #HotIf WinActive("ahk_exe ONENOTE.EXE")
@@ -19,17 +20,23 @@ InsertNetworkTemplate() {
         "Destination Subnet:"
     ]
 
+    ; Word Joiner is invisible but NOT whitespace, so OneNote is less likely
+    ; to discard the right-hand cell as empty during paste.
+    invisibleValue := Chr(0x2060)
+
     rows := ""
     fallbackText := ""
     for field in fields {
         rows .= '<tr>'
             . '<td style="border:1px solid #999; padding:5px; width:220px;">' field '</td>'
-            . '<td style="border:1px solid #999; padding:5px; width:240px;">&nbsp;</td>'
+            . '<td style="border:1px solid #999; padding:5px; width:240px;">' invisibleValue '</td>'
             . '</tr>'
-        fallbackText .= field "`t`r`n"
+        ; Preserve column 2 even if OneNote selects plain-text paste.
+        fallbackText .= field "`t" invisibleValue "`r`n"
     }
     html := '<table border="1" cellspacing="0" cellpadding="5" '
         . 'style="border-collapse:collapse; font-family:Calibri; font-size:11pt;">'
+        . '<colgroup><col style="width:220px;"><col style="width:240px;"></colgroup>'
         . rows . '</table>'
 
     savedClipboard := ClipboardAll()
@@ -41,7 +48,7 @@ InsertNetworkTemplate() {
 
     Sleep 120
     Send "^v"  ; Normal formatted paste, NOT Ctrl+Shift+V (paste as plain text).
-    Sleep 1100   ; Allow OneNote to finish reading the clipboard.
+    Sleep 2200   ; Allow slower managed/work OneNote installations to finish pasting.
     A_Clipboard := savedClipboard
 }
 
